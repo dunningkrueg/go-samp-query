@@ -284,15 +284,19 @@ func (query *Query) GetInfo(ctx context.Context, attemptDecode bool) (server Ser
 	}, []byte(" "))
 
 	if attemptDecode {
-		server.Gamemode = attemptDecodeANSI(gamemodeRaw, guessHelper)
-		server.Hostname = attemptDecodeANSI(hostnameRaw, guessHelper)
+		languageStr := ""
+		if languageLen > 0 {
+			languageStr = string(languageRaw)
+		}
+		server.Gamemode = attemptDecodeANSI(gamemodeRaw, guessHelper, languageStr)
+		server.Hostname = attemptDecodeANSI(hostnameRaw, guessHelper, languageStr)
 	} else {
 		server.Gamemode = string(gamemodeRaw)
 		server.Hostname = string(hostnameRaw)
 	}
 
 	if languageLen > 0 && attemptDecode {
-		server.Language = attemptDecodeANSI(languageRaw, guessHelper)
+		server.Language = attemptDecodeANSI(languageRaw, guessHelper, string(languageRaw))
 	} else {
 		server.Language = "-"
 	}
@@ -399,7 +403,19 @@ func openConnection(addr *net.UDPAddr) (conn *net.UDPConn, err error) {
 	return
 }
 
-func attemptDecodeANSI(input []byte, extra []byte) (result string) {
+func attemptDecodeANSI(input []byte, extra []byte, language string) (result string) {
+	// Fast path: If language is known, use the appropriate encoding
+	if encoding := getEncodingForLanguage(language); encoding != "" {
+		e, err := htmlindex.Get(encoding)
+		if err == nil {
+			dec := e.NewDecoder()
+			decoded, err := dec.Bytes(input)
+			if err == nil {
+				return string(decoded)
+			}
+		}
+	}
+
 	result = string(input)
 	detector, err := chardet.NewTextDetector().DetectBest(extra)
 	if err != nil {
@@ -415,4 +431,57 @@ func attemptDecodeANSI(input []byte, extra []byte) (result string) {
 		return
 	}
 	return string(decoded)
+}
+
+// getEncodingForLanguage returns the appropriate encoding based on server language
+func getEncodingForLanguage(language string) string {
+	language = strings.ToLower(language)
+
+	// For Cyrillic languages
+	if language == "russian" || language == "ru" || language == "ru-ru" ||
+		language == "ukrainian" || language == "uk" || language == "uk-ua" ||
+		language == "belarusian" || language == "be" ||
+		language == "bulgarian" || language == "bg" ||
+		language == "macedonian" || language == "mk" ||
+		language == "serbian" || language == "sr" {
+		return "windows-1251"
+	}
+
+	if language == "chinese" || language == "zh" || language == "zh-cn" || language == "zh-tw" {
+		return "gb18030"
+	}
+
+	if language == "korean" || language == "ko" || language == "ko-kr" {
+		return "euc-kr"
+	}
+
+	if language == "japanese" || language == "ja" || language == "ja-jp" {
+		return "shift-jis"
+	}
+
+	if language == "polish" || language == "pl" ||
+		language == "czech" || language == "cs" ||
+		language == "slovak" || language == "sk" ||
+		language == "hungarian" || language == "hu" ||
+		language == "romanian" || language == "ro" {
+		return "windows-1250"
+	}
+
+	if language == "turkish" || language == "tr" ||
+		language == "kurdish" || language == "ku" {
+		return "windows-1254"
+	}
+
+	if language == "greek" || language == "el" {
+		return "windows-1253"
+	}
+
+	if language == "arabic" || language == "ar" ||
+		language == "persian" || language == "fa" ||
+		language == "urdu" || language == "ur" {
+		return "windows-1256"
+	}
+
+	// If not recognized, return empty string
+	return ""
 }
